@@ -30,7 +30,7 @@ import { createPublicClient, encodeFunctionData, http } from "viem";
 import { useEffect, useState } from "react";
 import { ABI } from "./abi";
 
-import { liskSepolia } from "viem/chains"; // or your network
+import { base } from "viem/chains"; // or your network
 
 import {
   Transaction,
@@ -41,13 +41,18 @@ import {
   TransactionStatusLabel,
 } from "@coinbase/onchainkit/transaction";
 
-const CA = "0x66b2a49Afb8C3c196388172fdE8c8041EA1144e7";
+const CA = "0xD96A930c6e0e927C7bc52e46ED4Bb1E5096ED548";
 
 const title_max = 30;
 const desc_max = 250;
 
+function shortenEthAddress(address) {
+  if (!address) return "";
+  return address.slice(0, 4) + "****" + address.slice(-4);
+}
+
 const client = createPublicClient({
-  chain: liskSepolia, // or your chain (e.g., mainnet, polygon, etc)
+  chain: base, // or your chain (e.g., mainnet, polygon, etc)
   transport: http(),
 });
 
@@ -59,7 +64,29 @@ function App() {
   const [disabled, setDisabled] = useState(false);
   const [loading, setLoading] = useState(false);
   const { address } = useWalletContext();
-  const [myCampaigns, setMyCampaigns] = useState([])
+  const [myCampaigns, setMyCampaigns] = useState([]);
+  const [campaigns, setCampaigns] = useState([]);
+  const [ethPrice, setEthPrice] = useState(0);
+
+  useEffect(() => {
+    const fetchEthPrice = async () => {
+      try {
+        const response = await fetch(
+          "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd"
+        );
+        const data = await response.json();
+        setEthPrice(data.ethereum.usd);
+        console.log(data);
+      } catch (error) {
+        console.error("Failed to fetch ETH price:", error);
+      }
+    };
+
+    fetchEthPrice();
+    const interval = setInterval(fetchEthPrice, 60000); // refresh every 60s
+
+    return () => clearInterval(interval);
+  }, []);
 
   async function getCampaign(id) {
     setLoading(true);
@@ -79,18 +106,43 @@ function App() {
     }
   }
 
-  async function getAllCampaigns(creator) {
+  async function getAllCampaigns(creator = null) {
     setLoading(true);
     try {
-      console.log(client);
-      const campaigns = await client.readContract({
-        abi: ABI,
-        address: CA,
-        functionName: "getAllCampaigns",
-        args: [String(creator)],
-      });
-      console.log(campaigns)
-      setMyCampaigns(campaigns)
+      if (creator) {
+        const campaigns = await client.readContract({
+          abi: ABI,
+          address: CA,
+          functionName: "getAllCampaigns",
+          args: [String(creator)],
+        });
+        console.log(campaigns);
+        setMyCampaigns(campaigns);
+      } else {
+        const campaignCalls = Array.from({ length: 5 }, (_, i) => ({
+          address: CA,
+          abi: ABI,
+          functionName: "getCampaign",
+          args: [i + 1],
+        }));
+        try {
+          const result = await client.multicall({ contracts: campaignCalls });
+
+          const campaigns = result
+            .map((res) => (res.status === "success" ? res.result : null))
+            .filter(
+              (campaign) =>
+                campaign &&
+                campaign.creator !==
+                  "0x0000000000000000000000000000000000000000"
+            );
+
+          console.log(campaigns);
+          setCampaigns(campaigns);
+        } catch (err) {
+          console.error("Multicall failed:", err);
+        }
+      }
     } catch (err) {
       console.log(err);
     } finally {
@@ -99,6 +151,7 @@ function App() {
   }
 
   useEffect(() => {
+    getAllCampaigns();
     if (address) {
       getAllCampaigns(address);
     }
@@ -129,13 +182,15 @@ function App() {
     ],
   });
 
-  
-
   return (
     <>
-   
       {loading && <Loader />}
-      <DonationPopup setLoading={setLoading} getCampaign={getCampaign} ABI={ABI} />
+      <DonationPopup
+        setLoading={setLoading}
+        getCampaign={getCampaign}
+        ABI={ABI}
+        ethPrice={ethPrice}
+      />
       <header className="z-[3] fixed top-0 right-0 left-0  flex items-center shadow-black border-b justify-between p-4 bg-white text-white">
         <img src={Logo} className="w-28" />
 
@@ -186,16 +241,11 @@ function App() {
                 placeholder="Goal (in ETH)"
                 className="border p-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
-              <span className="text-sm">
-                use this free eth to usd converter{" "}
-                <a
-                  href="https://www.coinbase.com/converter/eth/usd"
-                  className="underline text-blue-600"
-                  target="_blank"
-                >
-                  link
-                </a>
-              </span>
+              {Number(goalEth) > 0 && (
+                <span className="text-sm text-gray-400 italic">
+                  ${(Number(goalEth) * ethPrice).toFixed(2)} USD
+                </span>
+              )}
               <p className="mt-2">Duration in days:</p>
               <input
                 type="number"
@@ -206,7 +256,7 @@ function App() {
                 className="border p-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
               <Transaction
-                chainId={4202}
+                chainId={8453}
                 calls={[
                   {
                     to: CA,
@@ -235,93 +285,203 @@ function App() {
             {myCampaigns.length === 0 ? (
               <p className="text-black">No campaigns yet.</p>
             ) : (
-              myCampaigns.map((campaign, index) => { 
+              myCampaigns.map((campaign, index) => {
                 const call_data = encodeFunctionData({
                   abi: ABI,
-                  functionName: 'claim',
+                  functionName: "claim",
                   args: [campaign.id], // <- depends on each item
                 });
-                const btnText = campaign.claimed ? "Claimed " : "Claim 🪙"
-                return(
-                <div
-                  key={index}
-                  className="border  p-4 rounded shadow flex flex-col gap-2"
-                >
-                  <h3 className="text-md font-bold text-black">
-                    {campaign.title}
-                  </h3>
-                  <p className="text-sm text-gray-700">
-                    {campaign.description}
-                  </p>
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm text-gray-700">
-                      Pledged: {Number(campaign.pledged) / 1e18} ETH
-                    </p>
-                    <p className="text-sm text-gray-700">
-                      Goal: {Number(campaign.goal) / 1e18} ETH
-                    </p>
-                  </div>
-                  <div className=" bg-gray-200 rounded-full h-2.5">
-                    <div
-                      className="bg-blue-600 h-2.5 rounded-full"
-                      style={{
-                        width: `${  Number(campaign.pledged) >= 100 ? 100 :
-                          (Number(campaign.pledged) / Number(campaign.goal)) *
-                          100
-                        }%`,
-                      }}
-                    ></div>
-                  </div>
-                  <p className="text-sm text-gray-500">
-                    Ends at:{" "}
-                    {new Date(Number(campaign.endAt) * 1000).toLocaleString()}
-                  </p>
-                  <a
-                    href={`https://crowdfunded.surge.sh?campaign=${campaign.id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 underline text-sm"
+                const btnText = campaign.claimed ? "Claimed " : "Claim 🪙";
+                return (
+                  <div
+                    key={index}
+                    className="border  p-4 rounded shadow flex flex-col gap-2"
                   >
-                    Share your crowdfund link
-                  </a>
-                  <Transaction
-                chainId={4202}
-                calls={[
-                  {
-                    to: CA,
-                    data: call_data,
-                    value: "0",
-                  },
-                ]}
+                    <h3 className="text-md font-bold text-black">
+                      {campaign.title}
+                    </h3>
+                    <p className="text-sm text-gray-700">
+                      {campaign.description}
+                    </p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-gray-700">
+                        Pledged: {Number(campaign.pledged) / 1e18} ETH (
+                        {((Number(campaign.pledged) / 1e18) * ethPrice).toFixed(
+                          2
+                        )}{" "}
+                        usd)
+                      </p>
+                      <p className="text-sm text-gray-700">
+                        Goal: {Number(campaign.goal) / 1e18} ETH (
+                        {((Number(campaign.goal) / 1e18) * ethPrice).toFixed(2)}{" "}
+                        usd)
+                      </p>
+                    </div>
+                    <div className=" bg-gray-200 rounded-full h-2.5">
+                      <div
+                        className="bg-blue-600 h-2.5 rounded-full"
+                        style={{
+                          width: `${
+                            (Number(campaign.pledged) / Number(campaign.goal)) *
+                              100 >=
+                            100
+                              ? 100
+                              : (Number(campaign.pledged) /
+                                  Number(campaign.goal)) *
+                                100
+                          }%`,
+                        }}
+                      ></div>
+                    </div>
+                    <p className="text-sm text-gray-500">
+                      Ends at:{" "}
+                      {new Date(Number(campaign.endAt) * 1000).toLocaleString()}
+                    </p>
+                    <a
+                      href={`https://crowdfunded.surge.sh?campaign=${campaign.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 underline text-sm"
+                    >
+                      Share your crowdfund link
+                    </a>
+                    <Transaction
+                      chainId={8453}
+                      calls={[
+                        {
+                          to: CA,
+                          data: call_data,
+                          value: "0",
+                        },
+                      ]}
 
-                // className="disabled:bg-pink-400 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg"
-              >
-                <TransactionButton
-                  text={btnText}
-                  
-                  disabled={campaign.claimed || Number(campaign.pledged) < Number(campaign.goal)}
-                />
-                <TransactionSponsor />
-                <TransactionStatus>
-                  <TransactionStatusLabel />
-                  <TransactionStatusAction />
-                </TransactionStatus>
-              </Transaction>
-                </div>
-              ) })
+                      // className="disabled:bg-pink-400 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg"
+                    >
+                      <TransactionButton
+                        text={btnText}
+                        disabled={
+                          campaign.claimed ||
+                          Number(campaign.pledged) < Number(campaign.goal)
+                        }
+                      />
+                      <TransactionSponsor />
+                      <TransactionStatus>
+                        <TransactionStatusLabel />
+                        <TransactionStatusAction />
+                      </TransactionStatus>
+                    </Transaction>
+                  </div>
+                );
+              })
             )}
           </section>
 
           <section className="border p-4 rounded shadow">
             <h2 className="text-lg font-bold text-black">Discover Campaigns</h2>
-            <p className="text-black">No campaigns to discover yet.</p>
+            {campaigns.length === 0 ? (
+              <p className="text-black">No campaigns to discover yet.</p>
+            ) : (
+              campaigns.map((campaign, index) => {
+                return (
+                  <div
+                    key={index}
+                    className="border  p-4 rounded shadow flex flex-col gap-2"
+                  >
+                    <h3 className="text-md font-bold text-black">
+                      {campaign.title}
+                    </h3>
+                    <p className="text-sm text-gray-700">
+                      {campaign.description}
+                    </p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-gray-700">
+                        Pledged: {Number(campaign.pledged) / 1e18} ETH (
+                        {((Number(campaign.pledged) / 1e18) * ethPrice).toFixed(
+                          2
+                        )}{" "}
+                        usd)
+                      </p>
+                      <p className="text-sm text-gray-700">
+                        Goal: {Number(campaign.goal) / 1e18} ETH (
+                        {((Number(campaign.goal) / 1e18) * ethPrice).toFixed(2)}{" "}
+                        usd)
+                      </p>
+                    </div>
+                    <div className=" bg-gray-200 rounded-full h-2.5">
+                      <div
+                        className="bg-blue-600 h-2.5 rounded-full"
+                        style={{
+                          width: `${
+                            (Number(campaign.pledged) / Number(campaign.goal)) *
+                              100 >=
+                            100
+                              ? 100
+                              : (Number(campaign.pledged) /
+                                  Number(campaign.goal)) *
+                                100
+                          }%`,
+                        }}
+                      ></div>
+                    </div>
+                    <p className="text-sm text-gray-500">
+                      Ends at:{" "}
+                      {new Date(Number(campaign.endAt) * 1000).toLocaleString()}
+                    </p>
+                    <p className="font-bold">
+                      Claimed: {campaign.claimed ? "✅" : "❌"}
+                    </p>
+                    <a
+                      href={`https://crowdfunded.surge.sh?campaign=${campaign.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 underline text-sm"
+                    >
+                      Share donation link
+                    </a>
+                    <p className="text-sm text-center">
+                      Creator:{" "}
+                      <a
+                        target="_blank"
+                        className="text-blue-600"
+                        href={`https://basescan.org/address/${campaign.creator}`}
+                      >
+                        {shortenEthAddress(campaign.creator)}
+                      </a>
+                    </p>
+                    <a
+                      href={`https://crowdfunded.surge.sh?campaign=${campaign.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full p-3 text-white bg-blue-600 rounded-xl text-center font-bold"
+                    >
+                      Donate
+                    </a>
+                    {campaign.claimed && (
+                      <p className="italic text-red-600 text-sm ">
+                        Warning: The creator of this campaign has claimed it or
+                        it has ended, but you can still donate
+                      </p>
+                    )}
+                  </div>
+                );
+              })
+            )}
           </section>
         </div>
       </div>
       <footer>
         <div className="p-4 bg-gray-100 text-center text-sm text-gray-600">
-          <p>Hosted on Lisk Sepolia Testnet</p>
-          <p>Contract Address: {CA}</p>
+          <p>Live on the BASE blockchain</p>
+          <p>
+            Contract Address:{" "}
+            <a
+              target="_blank"
+              className="text-blue-600"
+              href={`https://basescan.org/address/${CA}`}
+            >
+              {CA}
+            </a>
+          </p>
         </div>
       </footer>
     </>
@@ -331,14 +491,14 @@ function App() {
 // import { useSearchParams } from "react-router-dom"; // assuming react-router
 // import { formatEther } from "viem"; // for formatting ETH
 
-function DonationPopup({setLoading, getCampaign, ABI}) {
+function DonationPopup({ setLoading, getCampaign, ABI, ethPrice }) {
   const params = new URLSearchParams(window.location.search);
   const campaignId = params.get("campaign");
   const [amountEth, setAmountEth] = useState("");
 
-  useEffect(()=> {
-    console.log(String(Math.floor(Number(amountEth) * 1e18)))
-  }, [amountEth])
+  useEffect(() => {
+    console.log(String(Math.floor(Number(amountEth) * 1e18)));
+  }, [amountEth]);
   const [campaign, setCampaign] = useState(null);
 
   useEffect(() => {
@@ -366,43 +526,63 @@ function DonationPopup({setLoading, getCampaign, ABI}) {
     args: [campaignId],
   });
 
-  const btnText = campaign.claimed ? "Campaign has been Claimed" : "Pledge"
+  const btnText = campaign.claimed ? "Campaign has been Claimed" : "Pledge";
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 z-[1]  flex justify-center items-center">
       <div className="bg-white p-6 rounded shadow-lg w-96">
         <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold text-black">Donate</h2>
-        <a href="/" className="text-blue-600 text-sm">close</a>
+          <h2 className="text-lg font-bold text-black">Donate</h2>
+          <a href="/" className="text-blue-600 text-sm">
+            close
+          </a>
         </div>
         <h3 className="text-md font-bold text-gray-700 mt-2">
           {campaign.title}
         </h3>
-        <p className="text-sm text-gray-600">
-          {campaign.description.slice(0, 100)}...
-        </p>
+        <p className="text-sm text-gray-600">{campaign.description}</p>
         <div className="flex items-center justify-between mt-4">
-          <p className="text-sm text-gray-700">
-            Pledged: {Number(campaign.pledged) / 1e18} ETH
-          </p>
-          <p className="text-sm text-gray-700">
-            Goal: {Number(campaign.goal) / 1e18} ETH
-          </p>
+          <div>
+            <p className="text-sm text-gray-700">
+              Pledged: {Number(campaign.pledged) / 1e18} ETH
+            </p>
+            <p className="text-sm text-gray-700">
+              {((Number(campaign.pledged) / 1e18) * ethPrice).toFixed(2)} usd
+            </p>
+          </div>
+          <div>
+            <p className="text-sm text-gray-700">
+              Goal: {Number(campaign.goal) / 1e18} ETH{" "}
+            </p>
+            <p className="text-sm text-gray-700 text-right">
+              ${((Number(campaign.goal) / 1e18) * ethPrice).toFixed(2)}
+            </p>
+          </div>
         </div>
         <div className="w-full bg-gray-200 rounded-full h-2.5 mt-2">
           <div
             className="bg-blue-600 h-2.5 rounded-full"
             style={{
-              width: `${  Number(campaign.pledged) >= 100 ? 100 :
-                (Number(campaign.pledged) / Number(campaign.goal)) *
-                100
+              width: `${
+                (Number(campaign.pledged) / Number(campaign.goal)) * 100 >= 100
+                  ? 100
+                  : (Number(campaign.pledged) / Number(campaign.goal)) * 100
               }%`,
             }}
           ></div>
         </div>
         <p className="text-sm text-gray-500 mt-2">
-          Ends at:{" "}
-          {new Date(Number(campaign.endAt) * 1000).toLocaleString()}
+          Ends at: {new Date(Number(campaign.endAt) * 1000).toLocaleString()}
+        </p>
+        <p className="text-sm text-center">
+          Creator:{" "}
+          <a
+            target="_blank"
+            className="text-blue-600"
+            href={`https://basescan.org/address/${campaign.creator}`}
+          >
+            {shortenEthAddress(campaign.creator)}
+          </a>
         </p>
         <input
           type="number"
@@ -412,8 +592,13 @@ function DonationPopup({setLoading, getCampaign, ABI}) {
           placeholder="Amount (in ETH)"
           className="border p-2 rounded w-full mt-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
+        {Number(amountEth) > 0 && (
+          <span className="text-sm text-gray-400 italic">
+            ${(Number(amountEth) * ethPrice).toFixed(2)} USD
+          </span>
+        )}
         <Transaction
-          chainId={4202}
+          chainId={8453}
           calls={[
             {
               to: CA,
@@ -423,7 +608,7 @@ function DonationPopup({setLoading, getCampaign, ABI}) {
           ]}
         >
           <TransactionButton
-          disabled={!amountEth || campaign.claimed}
+            disabled={!amountEth || campaign.claimed}
             text={btnText}
             className="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
           />

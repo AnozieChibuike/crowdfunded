@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && bun run postbuild",
+    "postbuild": "bun ./postbuild.ts",
+    "deploy": "bun run build && surge dist crowdfunded.surge.sh",
     "lint": "eslint .",
     "preview": "vite preview"
   },

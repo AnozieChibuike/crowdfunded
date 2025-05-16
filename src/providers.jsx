@@ -1,12 +1,12 @@
 import React from "react";
 import { OnchainKitProvider } from "@coinbase/onchainkit";
-import { base, baseSepolia } from "wagmi/chains"; // add baseSepolia for testing
+import { base } from "wagmi/chains"; // add baseSepolia for testing
 
 export function Providers(props) {
   return (
     <OnchainKitProvider
       // apiKey={import.meta.env.VITE_PUBLIC_ONCHAINKIT_API_KEY}
-      chain={baseSepolia}
+      chain={base}
       config={{
         appearance: {
           name: "CrowdFunded", // Displayed in modal header
@@ -22,7 +22,7 @@ export function Providers(props) {
             trust: true,
           },
         },
-      }} // add baseSepolia for testing
+      }} 
     >
       {props.children}
     </OnchainKitProvider>
