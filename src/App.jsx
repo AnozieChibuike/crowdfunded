@@ -448,6 +448,7 @@ function App() {
                         {shortenEthAddress(campaign.creator)}
                       </a>
                     </p>
+                    {!campaign.claimed ? (
                     <a
                       href={`https://crowdfunded.surge.sh?campaign=${campaign.id}`}
                       target="_blank"
@@ -455,13 +456,10 @@ function App() {
                       className="w-full p-3 text-white bg-blue-600 rounded-xl text-center font-bold"
                     >
                       Donate
-                    </a>
-                    {campaign.claimed && (
-                      <p className="italic text-red-600 text-sm ">
-                        Warning: The creator of this campaign has claimed it or
-                        it has ended, but you can still donate
-                      </p>
+                    </a>) : (
+                      <button className="w-full p-3 text-white bg-gray-400 rounded-xl text-center font-bold" disabled={true}>Claimed</button>
                     )}
+                    
                   </div>
                 );
               })
